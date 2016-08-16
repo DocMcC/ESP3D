@@ -1,5 +1,4 @@
 $INCLUDE[header.inc]$
-$INCLUDE[header.inc]$
 $INCLUDE[css2.inc]$
 <div class="panel">
 <div class="panel-heading"><table><tr><td><div class="btnimg" onclick="control_expanded = expand_collapse(control_expanded,'pin_control','control')" id="pin_control">&#9660;</div></td><td>Control</td></tr></table></div>
