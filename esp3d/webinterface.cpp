@@ -30,7 +30,6 @@
 extern "C" {
 #include "user_interface.h"
 }
-#include <FS.h>
 #include "LinkedList.h"
 #include "storestrings.h"
 #include "command.h"
@@ -40,6 +39,10 @@ extern "C" {
 #endif
 
 #define MAX_AUTH_IP 10
+
+#ifdef DIRECT_SDCARD_FEATURE
+bool redosizecheck = true;
+#endif
 
 typedef enum {
   UPLOAD_STATUS_NONE = 0,
@@ -212,6 +215,42 @@ const char KEY_STA_SIGNAL [] PROGMEM = "$STA_SIGNAL$";
 const char KEY_DATA_PORT_VISIBILITY [] PROGMEM = "$DATA_PORT_VISIBILITY$";
 const char KEY_LOGIN_ID [] PROGMEM = "$LOGIN_ID$";
 
+#ifdef SDCARD_FEATURE
+bool WEBINTERFACE_CLASS::hasSD(){
+    delay(1);
+  /*  if (!SD.card()->errorCode())
+    {
+    //test card access
+    if ( SD.card()->cardSize() ) {
+        LOG("No error\n");
+        return true;
+        } 
+    }
+    LOG("SD cardSize failed!\n");
+    LOG(String(SD.card()->errorCode()));
+    LOG("\n");
+    delay(1);*/
+     //if no card seen try to mount 
+    if (!SD.begin(SDCARD_CS_PIN, SPI_HALF_SPEED)) 
+        {
+        LOG("SD initialization failed!\n");
+        LOG(String(SD.card()->errorCode()));
+        LOG("\n");
+        return false;
+        }
+    delay(1);
+    //now test SD access
+    if ( SD.card()->cardSize() ) {
+        return true;
+        } 
+    LOG("SD cardSize 2 failed!\n");
+    LOG(String(SD.card()->errorCode()));
+    LOG("\n");
+
+    return false;
+}
+#endif
+
 bool WEBINTERFACE_CLASS::isHostnameValid(const char * hostname)
 {
     //limited size
@@ -347,13 +386,13 @@ bool processTemplate(const char  * filename, STORESTRINGS_CLASS & KeysList ,  ST
         return false;
     }
     
-    LinkedList<File> myFileList  = LinkedList<File>();
+    LinkedList<FSFILE> myFileList  = LinkedList<FSFILE>();
     String  buffer2send;
     bool header_sent=false;
 
 	buffer2send="";
 	//open template file
-	File currentfile = SPIFFS.open(filename, "r");
+	FSFILE currentfile = SPIFFS.open(filename, "r");
 	//if error display error on web page
 	if (!currentfile) {
 		buffer2send = String(F("Error opening: ")) + filename;
@@ -382,7 +421,7 @@ bool processTemplate(const char  * filename, STORESTRINGS_CLASS & KeysList ,  ST
 						int pos_tag_end = sLine.indexOf("]$");
 						String includefilename = "/"+sLine.substring( pos_tag+strlen("$INCLUDE["),pos_tag_end);
 						//try to open include file
-						File includefile = SPIFFS.open(includefilename, "r");
+						FSFILE includefile = SPIFFS.open(includefilename, "r");
 						if (!includefile) { //if error display it on web page
 							buffer2send+= String("Error opening: ") + includefilename;
 						} else { //if include is open lets read it, current open file is now include file
@@ -2376,6 +2415,7 @@ void handle_web_interface_status()
     web_interface->WebServer.send(200, "application/json",buffer2send);
 }
 
+
 String formatBytes(size_t bytes)
 {
     if (bytes < 1024) {
@@ -2427,32 +2467,181 @@ String getContentType(String filename)
 
 void SPIFFSFileupload()
 {
+    //get authentication status
+    level_authenticate_type auth_level= web_interface->is_authenticated();
+            //Guest cannot upload
+        if (auth_level == LEVEL_GUEST)
+            {
+                web_interface->_upload_status=UPLOAD_STATUS_CANCELLED;
+                Serial.println("M117 Error ESP upload");
+                return;
+            }
+    //get current file ID
     HTTPUpload& upload = (web_interface->WebServer).upload();
+    //Upload start
+    //**************
     if(upload.status == UPLOAD_FILE_START) {
 		String filename;
-		if(web_interface->is_authenticated() == LEVEL_ADMIN) filename = upload.filename;
+        //according User or Admin the root is different as user is isolate to /user when admin has full access
+		if(auth_level == LEVEL_ADMIN) filename = upload.filename;
 		else filename = "/user" + upload.filename;
         Serial.println("M117 Start ESP upload");
+        //create file
         web_interface->fsUploadFile = SPIFFS.open(filename, "w");
         filename = String();
-        web_interface->_upload_status= UPLOAD_STATUS_ONGOING;
-    } else if(upload.status == UPLOAD_FILE_WRITE) {
-		web_interface->_upload_status= UPLOAD_STATUS_ONGOING;
-        if(web_interface->fsUploadFile) {
-            web_interface->fsUploadFile.write(upload.buf, upload.currentSize);
-        }
+        //check If creation succeed
+        if (web_interface->fsUploadFile)
+            {   //if yes upload is started
+                web_interface->_upload_status= UPLOAD_STATUS_ONGOING;
+            }
+         else
+            {   //if no set cancel flag
+                web_interface->_upload_status=UPLOAD_STATUS_CANCELLED;
+                Serial.println("M117 Error ESP create");
+            }
+    //Upload write
+    //**************
+    } else if(upload.status == UPLOAD_FILE_WRITE) 
+        {    //check if file is availble and no error
+            if(web_interface->fsUploadFile && web_interface->_upload_status == UPLOAD_STATUS_ONGOING) 
+                {
+                    //no error so write post date
+                    web_interface->fsUploadFile.write(upload.buf, upload.currentSize);
+                }
+            else
+                {   //we have a proble set flag UPLOAD_STATUS_CANCELLED
+                    web_interface->_upload_status=UPLOAD_STATUS_CANCELLED;
+                    Serial.println("M117 Error ESP write");
+                }
+    //Upload end
+    //**************
     } else if(upload.status == UPLOAD_FILE_END) {
-		web_interface->_upload_status=UPLOAD_STATUS_SUCCESSFUL;
 		Serial.println("M117 End ESP upload");
-        if(web_interface->fsUploadFile) {
-            web_interface->fsUploadFile.close();
-        }
+        //check if file is still open
+        if(web_interface->fsUploadFile) 
+            {   //close it
+                web_interface->fsUploadFile.close();
+                web_interface->_upload_status=UPLOAD_STATUS_SUCCESSFUL;
+            }
+        else
+            {   //we have a proble set flag UPLOAD_STATUS_CANCELLED
+                web_interface->_upload_status=UPLOAD_STATUS_CANCELLED;
+                Serial.println("M117 Error ESP close");
+            }
+    //Upload cancelled
+    //**************
     } else {
 		web_interface->_upload_status=UPLOAD_STATUS_CANCELLED;
         Serial.println("M117 Error ESP upload");
     }
     delay(0);
 }
+
+
+#ifdef DIRECT_SDCARD_FEATURE
+void SDFileupload()
+{
+    String filename ;
+    //retrieve current file id
+    HTTPUpload& upload = (web_interface->WebServer).upload();
+    //Upload start
+    //**************
+    if(upload.status == UPLOAD_FILE_START) {
+        //only user and admin can upload
+         if(web_interface->is_authenticated() == LEVEL_GUEST) 
+            {
+                web_interface->_upload_status=UPLOAD_STATUS_CANCELLED;
+                Serial.println("M117 SD upload failed");
+                LOG("SD upload failed\n");
+                return;
+            }
+         //check if SD Card is available
+        if ( !web_interface->hasSD()){
+            LOG("No SDCard\n");
+            Serial.println("M117 No SDCard");
+            web_interface->_upload_status=UPLOAD_STATUS_CANCELLED;
+            return;
+            }
+        filename= upload.filename;
+        Serial.println("M117 Uploading...");
+        LOG("Uploading...\n");
+        LOG(filename);
+        LOG("\n");
+        //delete file on SD Card if already present
+        if(SD.exists((char *)filename.c_str())) SD.remove((char *)filename.c_str());
+        //Create file for writing
+        web_interface->sdUploadFile = SD.open((char *)filename.c_str(), FILE_WRITE);
+        //check if creation succeed
+        if (!web_interface->sdUploadFile || SD.card()->errorCode()) 
+            {
+                //if creation failed
+                web_interface->_upload_status=UPLOAD_STATUS_CANCELLED;
+                Serial.println("M117 Fail create file");
+                LOG("Error Create file\n");
+            }
+        //if creation succeed set flag UPLOAD_STATUS_ONGOING
+        else  web_interface->_upload_status= UPLOAD_STATUS_ONGOING;
+    //Upload write
+    //**************
+    } else if(upload.status == UPLOAD_FILE_WRITE) {
+        if(web_interface->sdUploadFile && web_interface->_upload_status == UPLOAD_STATUS_ONGOING ) 
+            {
+            //no error write post data
+            web_interface->sdUploadFile.write(upload.buf, upload.currentSize);
+            LOG(String(upload.currentSize));
+            LOG(", ");
+            LOG(String(upload.totalSize));
+            LOG(" , mem: ");
+            LOG(String(ESP.getFreeHeap()));
+            LOG(" , SD Error: ");
+            LOG(String( SD.card()->errorCode()));
+            LOG("\n");
+            } 
+        else //if error set flag UPLOAD_STATUS_CANCELLED
+            {
+                web_interface->_upload_status = UPLOAD_STATUS_CANCELLED;
+                Serial.println("M117 Fail write file");
+                LOG("Error no file for writing\n");
+            }
+    //Upload end
+    //**************
+    } else if(upload.status == UPLOAD_FILE_END) {
+		Serial.println("M117 Upload finished ");
+        LOG("Upload finished\n");
+        //recheck size
+        redosizecheck = true;
+        //if file is open close it
+        if(web_interface->sdUploadFile) {
+            web_interface->_upload_status=UPLOAD_STATUS_SUCCESSFUL;
+            web_interface->sdUploadFile.close();
+            LOG("Closing File\n");
+            } 
+        else 
+            {//if no file there is a problem 
+                web_interface->_upload_status=UPLOAD_STATUS_CANCELLED;
+                Serial.println("M117 Fail close file");
+                LOG("Error no file to close\n");
+            }
+        LOG("SD Error: ");
+        LOG(String( SD.card()->errorCode()));
+        LOG("\n");
+    //Upload cancelled
+    //**************
+    } else {
+		web_interface->_upload_status=UPLOAD_STATUS_CANCELLED;
+        Serial.println("M117 SD upload failed");
+        LOG("SD upload failed\n");
+        LOG("SD Error: ");
+        LOG(String( SD.card()->errorCode()));
+        LOG("\n");
+        if(web_interface->sdUploadFile) {
+            web_interface->sdUploadFile.close();
+        } 
+    }
+    delay(0);
+}
+
+#else
 #define NB_RETRY 5
 #define MAX_RESEND_BUFFER 128 
 
@@ -2464,10 +2653,18 @@ void SDFileupload()
 	static bool com_error = false;
 	static bool is_comment = false;
 	String response;
-	//upload can be long so better to reset time out
-	web_interface->is_authenticated();
+    //Guest cannot upload - only admin and user
+     if(web_interface->is_authenticated() == LEVEL_GUEST) 
+            {
+                web_interface->_upload_status=UPLOAD_STATUS_CANCELLED;
+                Serial.println("M117 SD upload failed");
+                LOG("SD upload failed\n");
+                return;
+            }
+    //retrieve current file id
     HTTPUpload& upload = (web_interface->WebServer).upload();
-    //upload start
+    //Upload start
+    //**************
     if(upload.status == UPLOAD_FILE_START) {
 		//need to lock serial out to avoid garbage in file
 		(web_interface->blockserial) = true;
@@ -2504,7 +2701,9 @@ void SDFileupload()
 				}
 			delay(5);
 			}
-			//upload is on going with data coming by 2K blocks
+    //Upload write
+    //**************
+    //upload is on going with data coming by 2K blocks
     } else if((upload.status == UPLOAD_FILE_WRITE) && (com_error == false)){//if com error no need to send more data to serial
 			web_interface->_upload_status= UPLOAD_STATUS_ONGOING;
 			for (int pos = 0; pos < upload.currentSize;pos++) //parse full post data
@@ -2622,6 +2821,8 @@ void SDFileupload()
 							com_error = true;
 						}
 				}
+     //Upload end
+    //**************
     } else if(upload.status == UPLOAD_FILE_END) {
 			if (buffer_size > 0){//if last part does not have '\n'
 				//print the line
@@ -2693,6 +2894,8 @@ void SDFileupload()
 				Serial.println("M117 SD upload done");
 				Serial.flush();
 				}
+    //Upload cancelled
+    //**************
     } else { //UPLOAD_FILE_ABORTED
 		LOG("Error, Something happened\n");
 		com_error = true;
@@ -2710,30 +2913,53 @@ void SDFileupload()
         Serial.println("M117 SD upload failed");
         Serial.flush();
 		}
-	delay(0);
 }
+#endif
 
 #ifdef WEB_UPDATE_FEATURE
 void WebUpdateUpload()
 {
+    //only admin can update FW
+    if(web_interface->is_authenticated() != LEVEL_ADMIN) 
+            {
+                web_interface->_upload_status=UPLOAD_STATUS_CANCELLED;
+                Serial.println("M117 Update failed");
+                LOG("SD Update failed\n");
+                return;
+            }
+     //get current file ID
     HTTPUpload& upload = (web_interface->WebServer).upload();
+    //Upload start
+    //**************
     if(upload.status == UPLOAD_FILE_START) {
         Serial.println(F("M117 Update Firmware"));
         web_interface->_upload_status= UPLOAD_STATUS_ONGOING;
         WiFiUDP::stopAll();
         uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
         if(!Update.begin(maxSketchSpace)) { //start with max available size
+            web_interface->_upload_status=UPLOAD_STATUS_CANCELLED;
         }
+    //Upload write
+    //**************
     } else if(upload.status == UPLOAD_FILE_WRITE) {
-        web_interface->_upload_status= UPLOAD_STATUS_ONGOING;
-        if(Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-        }
+        //check if no error
+        if (web_interface->_upload_status == UPLOAD_STATUS_ONGOING)
+            {
+            if(Update.write(upload.buf, upload.currentSize) != upload.currentSize) 
+                {
+                    web_interface->_upload_status=UPLOAD_STATUS_CANCELLED;
+                }
+            }
+    //Upload end
+    //**************
     } else if(upload.status == UPLOAD_FILE_END) {
         if(Update.end(true)) { //true to set the size to the current progress
             //Now Reboot
+            Serial.println(F("M117 Update Done"));
             web_interface->_upload_status=UPLOAD_STATUS_SUCCESSFUL;
         }
     } else if(upload.status == UPLOAD_FILE_ABORTED) {
+        Serial.println(F("M117 Update Failed"));
         Update.end();
         web_interface->_upload_status=UPLOAD_STATUS_CANCELLED;
     }
@@ -2790,10 +3016,10 @@ void handleFileList()
                 {
                 status = shortname + F(" deleted");
                 //what happen if no "/." and no other subfiles ?
-                Dir dir = SPIFFS.openDir(path);
+                FSDIR dir = SPIFFS.openDir(path);
                 if (!dir.next())
                     {   //keep directory alive even empty
-                        File r = SPIFFS.open(path+"/.","w");
+                        FSFILE r = SPIFFS.open(path+"/.","w");
                         if (r)r.close();
                     }
                 }
@@ -2814,7 +3040,7 @@ void handleFileList()
             if (filename != "/")
                     {
                         bool delete_error = false;
-                        Dir dir = SPIFFS.openDir(path + shortname);
+                        FSDIR dir = SPIFFS.openDir(path + shortname);
                         {
                             while (dir.next()) {
                                  String fullpath = dir.fileName();
@@ -2841,7 +3067,7 @@ void handleFileList()
             if(SPIFFS.exists(filename)) {
                 status = shortname + F(" already exists!");
             } else {
-               File r = SPIFFS.open(filename,"w");
+               FSFILE r = SPIFFS.open(filename,"w");
                if (!r) {
                         status = F("Cannot create ");
                         status += shortname ;
@@ -2854,7 +3080,7 @@ void handleFileList()
         }
     }
     String jsonfile = "{";
-    Dir dir = SPIFFS.openDir(path);
+    FSDIR dir = SPIFFS.openDir(path);
     jsonfile+="\"files\":[";
     bool firstentry=true;
     String subdirlist="";
@@ -2888,7 +3114,7 @@ void handleFileList()
                //do not add "." file
             if (filename!=".")
                 {   
-                File f = dir.openFile("r");
+                FSFILE f = dir.openFile("r");
                 size = formatBytes(f.size());
                 f.close();
                 }
@@ -2916,7 +3142,7 @@ void handleFileList()
     jsonfile+="],";
     jsonfile+="\"path\":\"" + path + "\",";
     jsonfile+="\"status\":\"" + status + "\",";
-    FSInfo info;
+    FSINFO info;
     SPIFFS.info(info);
     jsonfile+="\"total\":\"" + formatBytes(info.totalBytes) + "\",";
     jsonfile+="\"used\":\"" + formatBytes(info.usedBytes) + "\",";
@@ -2929,38 +3155,391 @@ void handleFileList()
     web_interface->WebServer.send(200, "application/json", jsonfile);
 }
 
+#ifdef DIRECT_SDCARD_FEATURE
+bool  deleteRecursive(String path){
+  bool result = false; 
+  File file = SD.open((char *)path.c_str());
+  if(!file.isDirectory()){
+    LOG("Deleting file ")
+    LOG(path)
+    LOG("\n")
+    file.close();
+    return SD.remove((char *)path.c_str());
+  }
+  file.rewindDirectory();
+  while(true) {
+    File entry = file.openNextFile();
+    char tmp[255];
+    if (!entry) break;
+    String entryPath = path + "/";
+    entry.getName(tmp,254); 
+    entryPath += tmp;
+    LOG("entry: ")
+    LOG(entry)
+    LOG("entrypath: ")
+    LOG(entryPath)
+    LOG("\n")
+    if(entry.isDirectory()){
+      entry.close();
+      LOG("Deleting content dir ")
+      LOG(entryPath)
+      LOG("\n")
+      if(deleteRecursive(entryPath)) result = true;
+    } else {
+      entry.close();
+      LOG("Deleting dir ")
+      LOG(path)
+      LOG("\n")
+      if (!SD.remove((char *)entryPath.c_str())) 
+        {
+            LOG("Error deleting dir ")
+            LOG(entryPath)
+            LOG("\n")
+            result = true;
+            break;
+        }
+    }
+    yield();
+    }
+  file.close();
+  SD.rmdir((char *)path.c_str());
+  return result;
+  }
+
+#endif  
+
 void handleSDFileList()
 {
+    char tmp[255];
     if (web_interface->is_authenticated() == LEVEL_GUEST) {
         return;
     }
-    String jsonfile = "{\"status\":\"" ;
-    //if action is processing do not build list
+    LOG("List SD FILES\n")
+    String path="/";
+    String sstatus="Ok";
+    uint32_t totalspace = 0;
+    uint32_t usedspace = 0;
+     //get current path
+    if(web_interface->WebServer.hasArg("path"))path += web_interface->WebServer.arg("path") ;
+    //to have a clean path
+    path.trim();
+    path.replace("//","/");
+    if (path[path.length()-1] !='/')path +="/";
+       //check if query need some action
+    if(web_interface->WebServer.hasArg("action")) {
+        LOG("action requested\n")
+        //delete a file
+        if(web_interface->WebServer.arg("action") == "delete" && web_interface->WebServer.hasArg("filename")) {
+            LOG("delete requested\n")
+            String filename;
+            String shortname = web_interface->WebServer.arg("filename");
+            shortname.replace("/","");
+            filename = path + web_interface->WebServer.arg("filename");
+            filename.replace("//","/");
+            LOG(shortname)
+            LOG("\n")
+            LOG(filename)
+            LOG("\n")
+#ifdef DIRECT_SDCARD_FEATURE
+            if(!SD.exists((char *)filename.c_str())) {
+                sstatus = shortname + F(" does not exist!");
+            } else {
+               if (SD.remove((char *)filename.c_str()))  
+                {
+                sstatus = shortname + F(" deleted");
+                redosizecheck = true;
+                }
+               else {
+                        sstatus = F("Cannot deleted ") ;
+                        sstatus+=shortname ;
+                        }   
+            }
+#endif
+            LOG(sstatus)
+            LOG("\n")
+        }
+       //delete a directory
+        if(web_interface->WebServer.arg("action") == "deletedir" && web_interface->WebServer.hasArg("filename")) {
+             LOG("deletedir requested\n")
+            String filename;
+            String shortname = web_interface->WebServer.arg("filename");
+            shortname.replace("/","");
+            filename = path + web_interface->WebServer.arg("filename");
+            filename.replace("//","/");
+            LOG(shortname)
+            LOG("\n")
+            LOG(filename)
+            LOG("\n")
+#ifdef DIRECT_SDCARD_FEATURE
+            if (filename != "/")
+                    {
+                        if(!SD.exists((char *)filename.c_str())) {
+                            sstatus = shortname + F(" does not exist!");
+                        } else {
+                            if (deleteRecursive(filename)) {
+                                sstatus ="Error deleting: ";
+                                sstatus += shortname ;
+                            }
+                            else{
+                                sstatus = shortname ;
+                                sstatus+=" deleted";
+                                redosizecheck = true;
+                            }
+                        }
+                    }
+            else{
+                sstatus ="Cannot delete root";
+            }
+#endif
+            LOG(sstatus)
+            LOG("\n")
+        }
+        //create a directory
+        if(web_interface->WebServer.arg("action")=="createdir" && web_interface->WebServer.hasArg("filename")) {
+            String filename;
+            LOG("createdir requested\n")
+            filename = path + web_interface->WebServer.arg("filename") ;
+            String shortname = web_interface->WebServer.arg("filename");
+            shortname.replace("/","");
+            filename.replace("//","/");
+            LOG(shortname)
+            LOG("\n")
+            LOG(filename)
+            LOG("\n")
+#ifdef DIRECT_SDCARD_FEATURE
+            if(SD.exists((char *)filename.c_str())) {
+                sstatus = shortname + F(" already exists!");
+            } else {
+               if (!SD.mkdir((char *)filename.c_str())) {
+                        sstatus = F("Cannot create ");
+                        sstatus += shortname ;
+                        }
+               else {
+                        sstatus = shortname + F(" created");
+                        }
+            }
+#endif
+            LOG(sstatus)
+            LOG("\n")
+        }
+    }
+    
+    String jsonfile = "{" ;
+#ifndef DIRECT_SDCARD_FEATURE
+    //if action is processing do not build list, but no need Serial for Direct SDCard Support
      if ((web_interface->blockserial)){
 		 LOG("Wait, blocking\n");
-		 jsonfile+="processing\"}";
+		 jsonfile+="\"status\":\"processing\"}";
 		}
-	 else{
-		 jsonfile+="Ok\",\"file\":[";
+	 else
+#endif
+        {
+		 jsonfile+="\"files\":[";
 		 LOG("No Blocking \n");
 		 LOG("JSON File\n");
+#ifdef DIRECT_SDCARD_FEATURE
+        uint8_t sderrorcode = 0;
+        if ( !web_interface->hasSD()){
+            LOG("No SDCard \n");
+            web_interface->WebServer.sendHeader("Cache-Control", "no-cache");
+            web_interface->WebServer.send(200, "application/json", "{\"status\":\"No SD Card\"}");
+            web_interface->blockserial = false;
+            return;
+            }
+         LOG("SDCard \n");
+         if (path!="/" && !SD.exists((char *)path.c_str())) {
+            LOG(path);
+            LOG(" do not exist\n");
+            web_interface->WebServer.sendHeader("Cache-Control", "no-cache");
+            web_interface->WebServer.send(200, "application/json", "{{\"status\":\" Path does not exist on SD Card\"}");
+            return;
+            }   
+        File dir = SD.open((char *)path.c_str());
+        if (!dir)  LOG("error\n");
+        if(!dir.isDirectory()){
+            dir.close();
+            LOG("error\n");
+            }
+        dir.rewindDirectory();
+        File entry =  dir.openNextFile();
+        if (!entry) {
+            LOG("No files\n")
+            }
+        else 
+            {
+            LOG("Files:\n")
+            }
+        int i = 0;
+        while(entry){
+            if (i>0) {
+				jsonfile+=",";
+			}
+            jsonfile+="{\"name\":\"";
+            entry.getName(tmp,254); 
+            LOG(String(i+1));
+            LOG(tmp);
+            LOG( " ");
+			jsonfile+=tmp;
+            jsonfile+="\",\"size\":\"";
+            if (entry.isDirectory()) {
+                jsonfile+="-1";
+            } else {
+            // files have sizes, directories do not
+                jsonfile+=formatBytes(entry.size());
+                LOG( formatBytes(entry.size()));
+            }            
+            jsonfile+="\"}";
+			LOG("\n");
+            i++;
+            entry.close();
+            entry =  dir.openNextFile();   
+        }
+         dir.close();
+        jsonfile+="],\"path\":\"";
+        jsonfile+=path + "\",\"status\":\"";
+        static uint32_t volTotal = 1;
+        static uint32_t volFree = 0;
+        static uint8_t blocks = 1;
+        if (redosizecheck)
+            {
+            volTotal = SD.vol()->clusterCount();
+            sderrorcode+=SD.card()->errorCode();
+            volFree = SD.vol()->freeClusterCount();
+            sderrorcode+=SD.card()->errorCode();
+            blocks = SD.vol()->blocksPerCluster();
+            redosizecheck=false;
+            }
+        sderrorcode+=SD.card()->errorCode();
+        if (sderrorcode>0)sstatus="SD Card error";
+         jsonfile+=sstatus + "\",\"total\":\"";
+        LOG("clusterCount:");
+        LOG(String(volTotal));
+        LOG("\nError:");
+        LOG(String(SD.card()->errorCode()));
+        LOG("\nfreeClusterCount:");
+        LOG(String(volFree));
+        LOG("\nError:");
+        LOG(String(SD.card()->errorCode()));
+        LOG("\n");
+        String stotalspace,susedspace;
+        //SDCard are in GB or MB but no less
+        totalspace =  (512.00/(1024.00*1024.00)) * volTotal * blocks;
+        if (totalspace > 1024) 
+            {
+                totalspace =  (512.00/(1024.00*1024.00 * 1024.00)) * volTotal * blocks;
+                stotalspace = String(totalspace) +" GB";
+            }
+        else
+            {
+                stotalspace = String(totalspace) +" MB";
+            }
+        //used space can be GB to B 
+        usedspace = (512.00/(1024.00*1024.00)) *(volTotal - volFree) * blocks;
+        //can be GB
+        if (usedspace > 1024) 
+            {
+                usedspace =  (512.00/(1024.00*1024.00*1024.00)) * (volTotal - volFree) *  blocks;
+                susedspace = String(usedspace) +" GB";
+            }
+        //can be MB
+        else if (usedspace > 0)
+            {
+                susedspace = String(usedspace) +" MB";
+            }
+        else 
+            {
+                usedspace = (512.00/ 1024.00) *(volTotal-volFree) *  blocks;
+                if (usedspace == 0)//or B
+                    {
+                        susedspace = String(512.00 *(volTotal -volFree) *  blocks) +" B";
+                    } //ok KB
+                else susedspace = String(usedspace) +" KB";
+            }
+        uint32_t  occupedspace = (volFree/volTotal)*100;
+        //minimum if even one byte is used is 1%
+        if ( (occupedspace <= 1) && (volTotal!=volFree))occupedspace=1;
+        if (totalspace) jsonfile+=  stotalspace ;
+        else jsonfile+=  "-1";
+        jsonfile+="\",\"used\":\"";
+        jsonfile+=  susedspace ;
+        jsonfile+="\",\"occupation\":\"";
+        if (totalspace) jsonfile+=  intTostr(occupedspace);
+        else  jsonfile+=  "-1";
+        jsonfile+= "\"";
+        jsonfile+= "}";
+#else
 		 LOG(String(web_interface->fileslist.size()));
 		 LOG(" entries\n");
+         String sname;
 		for (int i=0; i<web_interface->fileslist.size(); i++) {
 			if (i>0) {
 				jsonfile+=",";
 			}
-			jsonfile+="{\"entry\":\"";
-			jsonfile+=web_interface->fileslist.get(i);
-			LOG(String(i+1));
-			LOG(web_interface->fileslist.get(i));
+			jsonfile+="{\"name\":\"";
+           sname = web_interface->fileslist.get(i);
+#if FIRMWARE_TARGET == REPETIER4DV || FIRMWARE_TARGET == REPETIER
+            //check if directory or file
+             if (sname[0] == '/' || sname[sname.length()-1]=='/') 
+                {
+                    jsonfile+=sname;
+                    jsonfile+="\",\"size\":\"";
+                    LOG(String(i+1));
+                    LOG(sname);
+                    jsonfile+="-1";
+                    LOG(" -1");
+                }
+            else //it is a file
+                {
+                    //get size position
+                    int posspace = sname.indexOf(" ");
+                    String ssize;
+                    if (posspace !=-1)
+                        {                    
+                            ssize = sname.substring(posspace+1);
+                            sname = sname.substring(0,posspace);
+                        }
+                    jsonfile+=sname;
+                    jsonfile+="\",\"size\":\"";
+                    LOG(String(i+1));
+                    LOG(sname);
+                    jsonfile+=ssize;
+                    LOG(" ");
+                    LOG(ssize);
+                }
+#endif
+#if FIRMWARE_TARGET == MARLIN || FIRMWARE_TARGET == MARLINKIMBRA || FIRMWARE_TARGET == SMOOTHIEWARE
+            jsonfile+=sname;
+            jsonfile+="\",\"size\":\"";
+            LOG(String(i+1));
+			LOG(sname);
+            if (sname[0] == '/' || sname[sname.length()-1]=='/') 
+                {
+                    jsonfile+="-1";
+                    LOG(" -1");
+                }
+            else 
+                {//nothing to add
+                    jsonfile+="";
+                }
 			LOG("\n");
+#endif
 			jsonfile+="\"}";
 			}
-		jsonfile+="]}";
+        jsonfile+="],\"path\":\"";
+        jsonfile+=path + "\",\"status\":\"";
+        jsonfile+=sstatus + "\",\"total\":\"";
+        jsonfile+= "-1";
+        jsonfile+="\",\"used\":\"";
+        jsonfile+= "-1";
+        jsonfile+="\",\"occupation\":\"";
+        jsonfile+=  "-1";
+        jsonfile+= "\"";
+        jsonfile+= "}";
+#endif
+
 		LOG("JSON done\n");
 		}
-    
+    path = String();
     web_interface->WebServer.sendHeader("Cache-Control", "no-cache");
     web_interface->WebServer.send(200, "application/json", jsonfile);
     web_interface->blockserial = false;
@@ -2976,18 +3555,61 @@ void handle_not_found()
         web_interface->WebServer.sendContent_P(NOT_AUTH_NF);
         return;
     }
-
-    String path = web_interface->WebServer.uri();
+    bool page_not_found = false;
+    String path = web_interface->WebServer.urlDecode(web_interface->WebServer.uri());
     String contentType = getContentType(path);
     String pathWithGz = path + ".gz";
+    LOG("request:")
+    LOG(path)
+    LOG("\n")
+    LOG("type:")
+    LOG(contentType)
+    LOG("\n")
+#ifdef DIRECT_SDCARD_FEATURE
+    LOG(path.substring(0,3) )
+    LOG("\n")
+    if (path.substring(0,4) == "/SD/")
+        {
+            LOG("SD file request\n")
+            //remove /SD
+            path = path.substring(3);
+             if(SD.exists((char *)pathWithGz.c_str()) || SD.exists((char *)path.c_str())) {
+                if(SD.exists((char *)pathWithGz.c_str())) {
+                    path = pathWithGz;
+                }
+                LOG("stream:")
+                LOG(path)
+                LOG("\n")
+                File datafile = SD.open((char *)path.c_str());
+                  if (!datafile){
+                       LOG("Cannot open file!\n");
+                       web_interface->WebServer.sendContent_P(NOT_AUTH_NF);
+                       page_not_found = true;
+                    }
+                if (web_interface->WebServer.streamFile(datafile, contentType) != datafile.size()) {
+                    LOG("Sent less data than expected!\n");
+                    }
+                else LOG("Stream done\n");
+                datafile.close();
+                delay(0);
+                return;
+            }
+            else page_not_found = true;
+        }
+    else
+#endif
     if(SPIFFS.exists(pathWithGz) || SPIFFS.exists(path)) {
         if(SPIFFS.exists(pathWithGz)) {
             path = pathWithGz;
         }
-        File file = SPIFFS.open(path, "r");
+        FSFILE file = SPIFFS.open(path, "r");
         web_interface->WebServer.streamFile(file, contentType);
         file.close();
-    } else {
+        return;
+    } else page_not_found = true;
+    
+    if (page_not_found )
+     {
         if (SPIFFS.exists("/404.tpl")) {
             STORESTRINGS_CLASS KeysList ;
             STORESTRINGS_CLASS ValuesList ;
@@ -3282,9 +3904,11 @@ WEBINTERFACE_CLASS::WEBINTERFACE_CLASS (int port):WebServer(port)
     info_msg.setlength(50);
     status_msg.setsize(4);
     status_msg.setlength(50);
+#ifndef DIRECT_SDCARD_FEATURE
     fileslist.setlength(100);//12 for filename + space + size
     fileslist.setsize(70); // 70 files to limite to 2K
-    fsUploadFile=(fs::File)0;
+#endif
+    fsUploadFile=(FSFILE)0;
     _head=NULL;
     _nb_ip=0;
     _upload_status=UPLOAD_STATUS_NONE;
@@ -3295,7 +3919,9 @@ WEBINTERFACE_CLASS::~WEBINTERFACE_CLASS()
     info_msg.clear();
     error_msg.clear();
     status_msg.clear();
+#ifndef DIRECT_SDCARD_FEATURE
     fileslist.clear();
+#endif
     while (_head) {
         auth_ip * current = _head;
         _head=_head->_next;
