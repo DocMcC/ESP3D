@@ -1,0 +1,22 @@
+before_script:
+    - "/sbin/start-stop-daemon --start --quiet --pidfile /tmp/custom_xvfb_99.pid --make-pidfile --background --exec /usr/bin/Xvfb -- :99 -ac -screen 0 1280x1024x16"
+    - "export DISPLAY=:99.0"
+    - sleep 3 # give xvfb some time to start
+    - tar xf /arduino-1.6.9-linux64.tar.xz
+    - mv arduino-1.6.9 $HOME/arduino_ide
+    - cd $HOME/arduino_ide/hardware
+    - mkdir esp8266com
+    - cd esp8266com
+    - git clone https://github.com/esp8266/Arduino.git esp8266
+    - cd esp8266/tools
+    - python get.py
+    - mv $CI_PROJECT_DIR/libraries/SdFat/SdFat $HOME/arduino_ide/libraries/
+    - mv $CI_PROJECT_DIR/libraries/IniFile $HOME/arduino_ide/libraries/
+  
+job1:
+    script:
+      - cd $CI_PROJECT_DIR
+      - source command.sh
+      - export PATH="$HOME/arduino_ide:$PATH"
+      - arduino --board esp8266com:esp8266:generic --save-prefs
+      - build_sketch esp3d/esp3d.ino

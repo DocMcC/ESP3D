@@ -24,6 +24,13 @@
 #include <WiFiClient.h>
 #include <WiFiServer.h>
 #include <ESP8266WebServer.h>
+#ifdef SDCARD_FEATURE
+#ifndef FS_NO_GLOBALS
+#define FS_NO_GLOBALS
+#endif
+#include "SdFat.h"
+extern SdFat SD;
+#endif
 #include <FS.h>
 #include "storestrings.h"
 
@@ -49,17 +56,23 @@ public:
     WEBINTERFACE_CLASS (int port = 80);
     ~WEBINTERFACE_CLASS();
     ESP8266WebServer WebServer;
-    File fsUploadFile;
+    FSFILE fsUploadFile;
+#ifdef DIRECT_SDCARD_FEATURE
+    File sdUploadFile;
+#endif
     bool isSSIDValid(const char * ssid);
     bool isPasswordValid(const char * password);
     bool isLocalPasswordValid(const char * password);
     bool isHostnameValid(const char * hostname);
     bool isIPValid(const char * IP);
+    bool hasSD();
     String answer4M105;
     String answer4M114;
     String answer4M220;
     String answer4M221;
+#ifndef DIRECT_SDCARD_FEATURE
     STORESTRINGS_CLASS fileslist;
+#endif
     uint32_t last_temp;
     STORESTRINGS_CLASS error_msg;
     STORESTRINGS_CLASS info_msg;

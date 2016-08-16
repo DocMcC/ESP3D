@@ -27,7 +27,7 @@ $SUCCESS_MSG$
 </div>
 </div>
 <div class="panel">
-<div class="panel-heading">Filesystem</div>
+<div class="panel-heading">Flash Filesystem</div>
 <div class="panel-body">
 <input type="file" id="file-select" name="myfiles[]" multiple />
 <input class="btn btn-primary" type="button" id="upload-button" onclick="Sendfile();" value="Upload"/>&nbsp;&nbsp;<progress style="visibility:hidden;" name='prg' id='prg' max='100'></progress>
@@ -37,7 +37,7 @@ $SUCCESS_MSG$
  <div onclick="Createdir()" class="btnimg"><svg width="40" height="40" viewBox="0 0 40 40"><rect x="5" y="10" width="30" height="20" rx="2" ry="2" fill="#31b0d5" />
  <rect x="20" y="5" width="15" height="15" rx="2" ry="2" fill="#31b0d5" /><text x="15" y="25" font-size="18"  font-weight="800"  fill="white">+</text></svg>
  </div>
- </td><td width="100%"><div id="path" class="info" >&nbsp</div>
+ </td><td><div id="loader" class="loader"></div></td><td width="100%"><div id="path" class="info" >&nbsp</div>
  </td>
  </tr></table>
 <table class="table table-striped" style="border:1px;solid #dddddd;margin-bottom:20px;" ><thead><tr><th width='0%'>Type</th><th>Name</th><th>Size</th><th width='0%'></th><th width='100%'></th></tr></thead><tbody id="file_list"><tbody></table>
@@ -83,7 +83,13 @@ function select_dir(directoryname){
     currentpath+=directoryname + "/";
     SendCommand('list','all');
 }
-function dispatchstatus(jsonresponse)
+function compareStrings(a, b) {
+  // case-insensitive comparison
+  a = a.toLowerCase();
+  b = b.toLowerCase();
+  return (a < b) ? -1 : (a > b) ? 1 : 0;
+}
+function dispatchfilestatus(jsonresponse)
 {
 var content ="";
 content ="&nbsp;&nbsp;Status: "+jsonresponse.status;
@@ -99,6 +105,9 @@ if (currentpath!="/")
      var previouspath = currentpath.slice(0,pos+1);
      content +="<tr style='cursor:hand;' onclick=\"currentpath='"+previouspath+"'; SendCommand('list','all');\"><td >"+back_icon()+"</td><td colspan='4'> Up..</td></tr>";
     }
+jsonresponse.files.sort(function(a, b) {
+    return compareStrings(a.name, b.name);
+});
 for (var i=0;i <jsonresponse.files.length;i++){
 //first display files
 if (String(jsonresponse.files[i].size) != "-1")
@@ -149,10 +158,12 @@ var xmlhttp = new XMLHttpRequest();
 var url = "/FILES?action="+action;
 url += "&filename="+encodeURI(filename);
 url += "&path="+encodeURI(currentpath);
+document.getElementById('loader').style.visibility="visible";
 xmlhttp.onreadystatechange = function() {
 if (xmlhttp.readyState == 4 && xmlhttp.status == 200) {
 var jsonresponse = JSON.parse(xmlhttp.responseText);
-dispatchstatus(jsonresponse);}
+document.getElementById('loader').style.visibility="hidden";
+dispatchfilestatus(jsonresponse);}
 }
 xmlhttp.open("GET", url, true);
 xmlhttp.send();
@@ -188,13 +199,16 @@ document.getElementById('upload-button').value = 'Upload';
 document.getElementById('prg').style.visibility = "hidden";
 document.getElementById('file-select').value="";
 var jsonresponse = JSON.parse(xmlhttp.responseText);
-dispatchstatus(jsonresponse);
+dispatchfilestatus(jsonresponse);
  } else alert('An error occurred!');
 }
 xmlhttp.send(formData);
 }
 
+window.onload = function() {
 SendCommand('list','all');
+}
+
 </script>
 $INCLUDE[footer.inc]$
 

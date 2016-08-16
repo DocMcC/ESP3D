@@ -11,7 +11,7 @@ Arduino ide 1.6.5 with stable [2.0.0](http://arduino.esp8266.com/versions/2.0.0/
 Arduino ide 1.6.8 with stable [2.2.0](http://arduino.esp8266.com/versions/2.2.0/package_esp8266com_index.json) from ESP8266, please use https://github.com/luc-github/ESP3D/releases/tag/v0.6.2    
 
 <u>Development version:</u>    
-Arduino ide 1.6.9 with git from ESP8266 : [![Build Status](https://travis-ci.org/luc-github/ESP3D.svg?branch=master)](https://travis-ci.org/luc-github/ESP3D)    
+Arduino ide 1.6.9 with git from ESP8266 : [![build status](http://tech-hunters.myds.me:2002/luc/ESP3D/badges/master/build.svg)](http://tech-hunters.myds.me:2002/luc/ESP3D/commits/master)
 
 [All releases](https://github.com/luc-github/ESP3D/wiki)
 
@@ -69,9 +69,6 @@ Web Page refresh: 3 secondes
 User: admin     
 Password: admin
 
-User:user
-Password: user
-
 These are the pages defined using template:    
 Home page :     
 <img src=https://raw.githubusercontent.com/luc-github/ESP3D/master/images/UI/Page1.png><br>
@@ -101,21 +98,19 @@ Because SPIFFS is flat filesystem, no directory management is necessary, so it i
 Additionally 404.tpl (the page not found) and restart.tpl(restart page when applying changes) are not mandatory, a fail safe version is embeded if they are not present.     
 
 ##Direct commands:    
-```
-    -Restart module from host/printer: [ESP888]RESTART      
-    -Send file line by line from SPIFFS: [ESP700]<file name>
+
+    -restart module from host/printer: [ESP888]RESTART      
     -Get IP (only printer see answer): [ESP111]M117     
-    -Reset EEPROM and restart: [ESP444]RESET   
-    -Reset user password: [ESP555]<admin password>    
-    -Display EEPROM content: [ESP444]CONFIG    
-    -Go to safe mode without restart: [ESP444]SAFEMODE    
+    -reset EEPROM and restart: [ESP444]RESET    
+    -display EEPROM content: [ESP444]CONFIG    
+    -go to safe mode without restart: [ESP444]SAFEMODE    
     -SSID: [ESP100]<SSID>    
     -Password: [ESP101]<Password>   
     -Station mode: [ESP103]STA   
     -AP mode: [ESP103]AP   
     -IP Static: [ESP104]STATIC    
     -IP DHCP: [ESP104]DHCP    
- ```
+ 
 ##Installation
 * For stable:
 Please use [Arduino IDE 1.6.5](http://arduino.cc/en/Main/Software)  with the esp8266 module from board manager use 2.0.0 stable version by adding in your preferences http://arduino.esp8266.com/version/2.0.0/package_esp8266com_index.json
@@ -128,41 +123,6 @@ with https://github.com/luc-github/ESP3D/releases/tag/v0.6.2
 Please use [Arduino IDE 1.6.8](http://arduino.cc/en/Main/Software) and [git version of esp8266 module](http://esp8266.github.io/Arduino/versions/2.2.0/doc/installing.html#using-git-version)
 
 * To flash the module :   
-You must define the targeted FW,  can be REPETIER (Original Repetier)/ REPETIER4DV (Repetier for Davinci) / MARLIN (Marlin)/ SMOOTHIEWARE (Smoothieware) in config.h and enable/disable any others features
-```
-//MDNS_FEATURE: this feature allow  type the name defined
-//in web browser by default: http:\\esp8266.local and connect
-//#define MDNS_FEATURE
-
-//SSDD_FEATURE: this feature is a discovery protocol, supported on Windows out of the box
-#define SSDP_FEATURE
-
-//CAPTIVE_PORTAL_FEATURE: In SoftAP redirect all unknow call to main page
-#define CAPTIVE_PORTAL_FEATURE
-
-//AUTHENTICATION_FEATURE: protect pages by login password
-#define AUTHENTICATION_FEATURE
-
-//WEB_UPDATE_FEATURE: allow to flash fw using web UI
-#define WEB_UPDATE_FEATURE
-
-//SERIAL_COMMAND_FEATURE: allow to send command by serial
-#define SERIAL_COMMAND_FEATURE
-
-//TCP_IP_DATA_FEATURE: allow to connect serial from TCP/IP
-#define TCP_IP_DATA_FEATURE
-
-//RECOVERY_FEATURE: allow to use GPIO2 pin as hardware reset for EEPROM, add 8s to boot time to let user to jump GPIO2 to GND
-#define RECOVERY_FEATURE
-
-//FIRMWARE_TARGET: the targeted FW, can be REPETIER (Original Repetier)/ REPETIER4DV (Repetier for Davinci) / MARLIN (Marlin)/ SMOOTHIEWARE (Smoothieware)
-#define FIRMWARE_TARGET REPETIER4DV
-
-//DEBUG Flag
-//#define DEBUG_ESP3D 
-```
-
-
 For better performance select CPU Frequency to be 160MHz instead of default 80MHz   
 Use IDE to upload directly  (latest version of board manager module generate one binary)     
 * To flash the html files present in data directory you need to use another tool, installation and usage is explained [here](https://github.com/esp8266/Arduino/blob/master/doc/filesystem.md#uploading-files-to-file-system)    

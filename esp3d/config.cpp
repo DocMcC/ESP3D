@@ -502,6 +502,12 @@ void CONFIG::print_config()
 #else
     Serial.println(F("???"));
 #endif
+  Serial.print(F("SD Card support: "));
+#ifdef SDCARD_FEATURE
+    Serial.println(F("Enabled"));
+#else
+    Serial.println(F("Disabled"));
+#endif
 #ifdef DEBUG_ESP3D
     Serial.print(F("Debug Enabled :"));
 #ifdef DEBUG_OUTPUT_SPIFFS
@@ -513,6 +519,5 @@ void CONFIG::print_config()
 #ifdef DEBUG_OUTPUT_SERIAL
     Serial.println(F("serial"));
 #endif
-#endif 
-    
+#endif
 }

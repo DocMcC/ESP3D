@@ -49,19 +49,32 @@ DNSServer dnsServer;
 #ifdef NETBIOS_FEATURE
 #include <ESP8266NetBIOS.h>
 #endif
-#include <FS.h>
+
+#ifdef SDCARD_FEATURE
+SdFat SD;
+#endif
+
 #define MAX_SRV_CLIENTS 1
 WiFiServer * data_server;
 WiFiClient serverClients[MAX_SRV_CLIENTS];
+
 
 void setup()
 {
     // init:
     web_interface = NULL;
     data_server = NULL;
-    WiFi.disconnect();
-    WiFi.mode(WIFI_OFF);
-    bool breset_config=false;
+    //WiFi.disconnect();
+    //WiFi.mode(WIFI_OFF);
+    bool breset_config=false; 
+#ifdef SDCARD_FEATURE
+    if (!SD.begin(SDCARD_CS_PIN, SPI_HALF_SPEED)) {
+        //TBD
+    }
+    else {
+        //TBD
+        }
+#endif  
 #ifdef RECOVERY_FEATURE
     delay(8000);
     //check if reset config is requested
@@ -87,11 +100,12 @@ void setup()
         breset_config=true;    //cannot access to config settings=> reset settings
     }
 
-
+    SPIFFS.begin();  
+    
     //reset is requested
     if(breset_config) {
         //update EEPROM with default settings
-        Serial.begin(9600);
+        Serial.begin(115200);
         delay(2000);
         Serial.println(F("M117 ESP EEPROM reset"));
         CONFIG::reset_config();
@@ -110,8 +124,19 @@ void setup()
         };
     }
     //setup serial
-    Serial.begin(baud_rate);
+    Serial.begin(baud_rate);    
     delay(1000);
+    LOG("Serial Set\n");
+#ifdef SDCARD_FEATURE
+    if (!SD.card()->errorCode()) {
+        LOG("SD initialization Ok!\n");
+        }
+    else {
+        LOG("SD initialization failed!\n");
+        LOG(String(SD.card()->errorCode()));
+        LOG("\n");
+        }
+#endif
     wifi_config.baud_rate=baud_rate;
     //setup wifi according settings
     if (!wifi_config.Setup()) {
@@ -166,10 +191,10 @@ String shost;
     SSDP.setDeviceType("upnp:rootdevice");
     SSDP.begin();
 #endif
-    SPIFFS.begin();
 #ifdef NETBIOS_FEATURE
     NBNS.begin(shost.c_str());
 #endif
+
     LOG("Setup Done\n");
 }
 

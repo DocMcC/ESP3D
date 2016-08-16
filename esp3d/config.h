@@ -22,7 +22,8 @@
 #define REPETIER		0
 #define REPETIER4DV	1
 #define MARLIN		2
-#define SMOOTHIEWARE	3
+#define MARLINKIMBRA		3
+#define SMOOTHIEWARE	4
 
 //comment to disable
 //MDNS_FEATURE: this feature allow  type the name defined
@@ -39,7 +40,7 @@
 #define CAPTIVE_PORTAL_FEATURE
 
 //AUTHENTICATION_FEATURE: protect pages by login password
-#define AUTHENTICATION_FEATURE
+//#define AUTHENTICATION_FEATURE
 
 //WEB_UPDATE_FEATURE: allow to flash fw using web UI
 #define WEB_UPDATE_FEATURE
@@ -51,19 +52,59 @@
 #define TCP_IP_DATA_FEATURE
 
 //RECOVERY_FEATURE: allow to use GPIO2 pin as hardware reset for EEPROM, add 8s to boot time to let user to jump GPIO2 to GND
-#define RECOVERY_FEATURE
+//#define RECOVERY_FEATURE
 
 //FIRMWARE_TARGET: the targeted FW, can be REPETIER (Original Repetier)/ REPETIER4DV (Repetier for Davinci) / MARLIN (Marlin)/ SMOOTHIEWARE (Smoothieware)
 #define FIRMWARE_TARGET REPETIER4DV
 
+//DIRECT_SDCARD_FEATURE: to use SD Card store print files instead of sending them by serial to Board FW
+#define DIRECT_SDCARD_FEATURE
+
+//Need to enable SD library and isolate fs library
+#define SDCARD_FEATURE
+
+//check SD Card is enable if direct access
+#if defined(DIRECT_SDCARD_FEATURE) && !defined(SDCARD_FEATURE)
+#define SDCARD_FEATURE
+#endif
+
+#ifdef SDCARD_FEATURE
+//SD_CS_PIN : cs pin 
+#define SDCARD_CS_PIN  15
+#endif
+
+//WEBHOST_SDCARD_FEATURE : to use SDCard to host webpages
+#define WEBHOST_SDCARD_FEATURE
+
 //DEBUG Flag
-//#define DEBUG_ESP3D 
+#define DEBUG_ESP3D 
+//#define DEBUG_OUTPUT_SPIFFS
+//#define DEBUG_OUTPUT_SD
+#define DEBUG_OUTPUT_SERIAL
 
 #ifdef DEBUG_ESP3D
-#define LOG(string) {File logfile = SPIFFS.open("/log.txt", "a+");logfile.print(string);logfile.close();}
+#ifdef DEBUG_OUTPUT_SPIFFS
+    #define LOG(string) {FSFILE logfile = SPIFFS.open("/log.txt", "a+");logfile.print(string);logfile.close();}
+#else
+    #ifdef DEBUG_OUTPUT_SD
+        #define LOG(string) {File logfile = SD.open("/log.txt", "a+");logfile.print(string);logfile.close();}
+    #else
+        #define LOG(string) {Serial.print(string);}
+    #endif
+#endif
 #else
 #define LOG(string) {}
 #endif
+
+#ifdef SDCARD_FEATURE
+#define FSFILE fs::File
+#define FSDIR fs::Dir
+#define FSINFO fs::FSInfo
+#else
+#define FSFILE File
+#define FSDIR fs::Dir
+#define FSINFO FSInfo
+#endif 
 
 #ifndef CONFIG_h
 #define CONFIG_h
@@ -71,7 +112,7 @@
 #include <Arduino.h>
 #include "wifi.h"
 //version and sources location
-#define FW_VERSION "0.7.81"
+#define FW_VERSION "0.8.12"
 #define REPOSITORY "https://github.com/luc-github/ESP8266"
 
 
@@ -119,7 +160,7 @@ const char DEFAULT_PASSWORD [] PROGMEM =	"12345678";
 const byte DEFAULT_IP_VALUE[]   =	        {192, 168, 0, 1};
 const byte DEFAULT_MASK_VALUE[]  =	        {255, 255, 255, 0};
 #define DEFAULT_GATEWAY_VALUE   	        DEFAULT_IP_VALUE
-const long DEFAULT_BAUD_RATE =			9600;
+const long DEFAULT_BAUD_RATE =			115200;
 const char M117_[] PROGMEM =		"M117 ";
 #define DEFAULT_PHY_MODE			WIFI_PHY_MODE_11G
 #define DEFAULT_SLEEP_MODE			WIFI_MODEM_SLEEP

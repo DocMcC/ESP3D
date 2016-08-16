@@ -41,6 +41,7 @@ WIFI_CONFIG::WIFI_CONFIG()
     _hostname[0]=0;
 }
 
+
 int32_t WIFI_CONFIG::getSignal(int32_t RSSI)
 {
     if (RSSI <= -100) return 0;

@@ -22,6 +22,11 @@
 #include "config.h"
 #include "wifi.h"
 #include "webinterface.h"
+#ifdef SDCARD_FEATURE
+#ifndef FS_NO_GLOBALS
+#define FS_NO_GLOBALS
+#endif
+#endif
 #include <FS.h>
 
 String COMMAND::buffer_serial;
@@ -35,6 +40,7 @@ void COMMAND::execute_command(int cmd,String cmd_params)
     switch(cmd) {
         byte mode;
     case 800:
+        Serial.print(cmd_params);
         Serial.print("\nFW version:");
         Serial.println(FW_VERSION);
         break;
@@ -52,7 +58,7 @@ void COMMAND::execute_command(int cmd,String cmd_params)
             Serial.println("\nOk");
         }
         break;
-    case 102:
+     case 102:
         if(!CONFIG::write_string(EP_HOSTNAME,cmd_params.c_str())) {
             Serial.println("\nError");
         } else {
@@ -60,6 +66,7 @@ void COMMAND::execute_command(int cmd,String cmd_params)
         }
         break;   
     case 103:
+
         if (cmd_params=="STA") {
             mode = CLIENT_MODE;
         } else {
@@ -142,7 +149,7 @@ void COMMAND::execute_command(int cmd,String cmd_params)
         if ((web_interface->blockserial)) break;
         cmd_params.trim() ;
         if ((cmd_params.length() > 0) && (cmd_params[0] != '/')) cmd_params = "/" + cmd_params;
-        File currentfile = SPIFFS.open(cmd_params, "r");
+        FSFILE currentfile = SPIFFS.open(cmd_params, "r");
         if (currentfile) {//if file open success
             //flush to be sure send buffer is empty
             Serial.flush();
@@ -191,8 +198,10 @@ void COMMAND::execute_command(int cmd,String cmd_params)
 
 void COMMAND::check_command(String buffer)
 {
-    static bool bfileslist=false;
     String buffer2;
+//if direct access to SDCard no need to handle the M20 command answer
+#ifndef DIRECT_SDCARD_FEATURE
+    static bool bfileslist=false;    
     static uint32_t start_list=0;
     //if SD list is not on going
     if (!bfileslist) {
@@ -210,6 +219,7 @@ void COMMAND::check_command(String buffer)
             (web_interface->blockserial) = true;
             return;
         }
+#endif
         int Tpos = buffer.indexOf("T:");
         int Xpos = buffer.indexOf("X:");
         int Ypos = buffer.indexOf("Y:");
@@ -306,6 +316,7 @@ void COMMAND::check_command(String buffer)
 			(web_interface->status_msg).add(buffer.substring(Statuspos+7).c_str());
 #endif
         }
+#ifndef DIRECT_SDCARD_FEATURE
     } else { //listing file is on going
 		//check if we are too long 
         if ((millis()-start_list)>30000) { //timeout in case of problem
@@ -330,6 +341,7 @@ void COMMAND::check_command(String buffer)
         }
 
     }
+#endif
 }
 
 //read a buffer in an array
